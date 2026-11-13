@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2a1a">
+<title>Trena → Planta</title>
+<link rel="manifest" href="manifest.json">
+<style>
+:root{
+  --bg:#f4f3ee; --card:#fff; --ink:#1d1f1b; --mut:#6b6f66; --line:#dcdad2;
+  --acc:#5a8f1e; --acc2:#7cc22a; --warn:#b5541b; --ok:#2f7d32; --sel:#eef6e3;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;cursor:pointer}
+header{position:sticky;top:0;z-index:5;background:#1f2a1a;color:#fff;padding:10px 12px;display:flex;gap:8px;align-items:center}
+header h1{font-size:17px;margin:0;flex:1;font-weight:600}
+.pill{font-size:13px;padding:4px 10px;border-radius:999px;background:#3a4a30;color:#dfe;border:0}
+.pill.on{background:var(--acc2);color:#132}
+main{padding:12px;max-width:720px;margin:0 auto 140px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.crumbs{font-size:14px;color:var(--mut);margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.crumbs a{color:var(--acc);text-decoration:none;font-weight:600}
+h2{font-size:20px;margin:0 0 4px}
+h3{font-size:15px;margin:14px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 12px}
+.btn.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+.btn.w{color:var(--warn)}
+.btn.sm{padding:6px 10px;font-size:14px}
+.list{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff}
+.item .n{flex:1}
+.item .n small{display:block;color:var(--mut)}
+.tag{font-size:12px;padding:2px 8px;border-radius:999px;background:#eee;color:#444}
+.slot{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.slot.alvo{border:2px solid var(--acc2);background:var(--sel)}
+.slot .r{flex:1}
+.slot .v{font-variant-numeric:tabular-nums;font-weight:700;font-size:18px}
+.slot .v.vazio{color:#bbb;font-weight:400}
+.foot{position:fixed;left:0;right:0;bottom:0;background:#1f2a1a;color:#fff;padding:10px 12px calc(10px + env(safe-area-inset-bottom));z-index:6}
+.foot .in{max-width:720px;margin:0 auto;display:flex;gap:10px;align-items:center}
+.leit{flex:1}
+.leit b{font-size:30px;font-variant-numeric:tabular-nums;display:block;line-height:1}
+.leit small{color:#bcc6b3}
+.big{font-size:18px;padding:14px 18px;border-radius:12px;border:0;background:var(--acc2);color:#132;font-weight:700}
+input,select,textarea{font:inherit;width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+textarea{min-height:70px}
+label{font-size:14px;color:var(--mut);display:block;margin:8px 0 4px}
+dialog{border:0;border-radius:14px;padding:0;width:min(560px,94vw)}
+dialog .c{padding:16px}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.log{font:12px/1.3 ui-monospace,monospace;white-space:pre-wrap;background:#111;color:#9f9;padding:8px;border-radius:8px;max-height:220px;overflow:auto}
+.hint{font-size:13px;color:var(--mut)}
+.toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;z-index:20;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+.toast.s{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>Trena → Planta</h1>
+  <button class="pill" id="btBtn">Conectar trena</button>
+  <button class="pill" id="menuBtn">☰</button>
+</header>
+
+<main id="app"></main>
+
+<div class="foot"><div class="in">
+  <div class="leit"><small id="leitInfo">Última leitura</small><b id="leitVal">—</b></div>
+  <button class="big" id="medirBtn">Medir</button>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Dialogo genérico -->
+<dialog id="dlg"><div class="c" id="dlgC"></div></dialog>
+
+<script>
+"use strict";
+/* ===================== Protocolo Huepar S120 (BLE) ===================== */
+const SVC = 0xae30;                 // 0000ae30-0000-1000-8000-00805f9b34fb
+const CH_TX = 0xae01;               // write-without-response
+const CH_DATA = 0xae02;             // notify
+const CH_STATUS = 0xae05;           // indicate
+
+function pkt(bytes){ // F1 + bytes + checksum(soma mod 256)
+  const s = bytes.reduce((a,b)=>a+b,0) & 0xff;
+  return new Uint8Array([0xF1, ...bytes, s]);
+}
+const CMD = {
+  medir:  pkt([0x04,0x01,0x01]),   // F1 04 01 01 06
+  versao: pkt([0x03,0x03]),        // F1 03 03 06
+};
+const hex = u8 => Array.from(u8).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+const u32 = (b,o)=> ((b[o]<<24)>>>0) + (b[o+1]<<16) + (b[o+2]<<8) + b[o+3];
+const ERROS = {1:'Err 1: alvo longe demais',2:'Err 2: alvo perto demais',3:'Err 3: luz ambiente forte',4:'Err 4: fora do alcance'};
+
+/* Interpreta um pacote (já remontado). Retorna null ou {tipo, valor(m), conf, info}. */
+function parsePacote(b){
+  if(!b || b.length<3 || b[0]!==0xF1) return null;
+  const t=b[1], s=b[2];
+  // erro
+  if(t===0x05 && s===0x01) return {tipo:'erro', info:'Erro da trena', codigo:b[8]};
+  if(t===0x04 && s===0x05) return {tipo:'erro', info:'Erro da trena', codigo:b[3]};
+  // histórico: distância uint16 BE em mm nos bytes 9-10
+  if(t===0x03 && s===0x01 && b.length>=11){
+    return {tipo:'historico', valor:((b[9]<<8)|b[10])/1000, conf:'alta'};
+  }
+  // medição: estrutura de 23 bytes após o prefixo; RecDataMain = bytes 12-15
+  const ehMed = (t===0x02 && (s===0x01||s===0x04)) || (t===0x04 && s===0x01);
+  if(ehMed){
+    for(const off of [3,2,4]){
+      if(b.length < off+16) continue;
+      const main = u32(b, off+12);
+      let modo=null, neg=false, unid=0;
+      if(b.length >= off+23){ modo=b[off+20]&0x1f; neg=!!(b[off+22]&0x10); unid=(b[off+22]>>5)&7; }
+      let div=1000, tipo='distancia';
+      if(modo===0x03){div=1e6;tipo='area';} else if(modo===0x04){div=1e9;tipo='volume';}
+      const v=(neg?-1:1)*main/div;
+      const plaus = tipo!=='distancia' || (v>=0.03 && v<=150);
+      if(main>0 && plaus) return {tipo, valor:v, conf: off===3?'alta':'media', modo, unid, offset:off};
+    }
+    return {tipo:'incompleto'};
+  }
+  return null;
+}
+
+/* ===================== Estado / persistência ===================== */
+const KEY='trena-planta-v1';
+const uid=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
+const MODELOS = {
+  lote:   ['Frente (rua)','Fundo','Lateral esquerda','Lateral direita','Diagonal 1','Diagonal 2','Largura da calçada'],
+  area:   ['Comprimento externo','Largura externa','Recuo frente','Recuo fundo','Recuo lateral esq.','Recuo lateral dir.'],
+  comodo: ['Comprimento','Largura','Diagonal 1','Diagonal 2','Pé-direito'],
+  porta:  ['Largura','Altura','Distância do canto'],
+  janela: ['Largura','Altura','Peitoril','Distância do canto'],
+  outro:  ['Medida 1'],
+};
+const TIPOS = {lote:'Lote', area:'Área / Bloco', comodo:'Cômodo', porta:'Porta', janela:'Janela', outro:'Elemento'};
+const FILHOS = {lote:['area','outro'], area:['comodo','outro'], comodo:['porta','janela','outro'], porta:[], janela:[], outro:['outro']};
+
+function novoNo(tipo,nome,pai){
+  return {id:uid(), pai, tipo, nome, obs:'', criado:new Date().toISOString(),
+    medidas: (MODELOS[tipo]||[]).map(r=>({id:uid(), rotulo:r, valor:null}))};
+}
+function estadoInicial(){
+  const lote=novoNo('lote','Lote',null);
+  return {versao:1, projeto:'Levantamento da casa', nos:[lote], atual:lote.id, alvo:null, config:{}};
+}
+let S;
+function carregar(){ try{ S=JSON.parse(localStorage.getItem(KEY)); }catch(e){ S=null; } if(!S||!S.nos) S=estadoInicial(); }
+function salvar(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Não consegui salvar no aparelho: '+e.message); } }
+const no = id => S.nos.find(n=>n.id===id);
+const filhos = id => S.nos.filter(n=>n.pai===id);
+function caminho(id){ const c=[]; let n=no(id); while(n){ c.unshift(n); n=no(n.pai); } return c; }
+
+/* ===================== UI ===================== */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=v=> v==null ? '—' : v.toFixed(3).replace('.',',')+' m';
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('s'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('s'),2600); }
+
+function proximoAlvo(n){ const m=n.medidas.find(x=>x.valor==null); return m?m.id:null; }
+
+function render(){
+  const n=no(S.atual)||S.nos[0]; S.atual=n.id;
+  if(!n.medidas.find(m=>m.id===S.alvo)) S.alvo=proximoAlvo(n);
+  const cam=caminho(n.id);
+  const fs=filhos(n.id);
+  const feitos=n.medidas.filter(m=>m.valor!=null).length;
+  $('#app').innerHTML = `
+  <div class="crumbs">${cam.map((c,i)=> i<cam.length-1 ? `<a href="#" data-ir="${c.id}">${esc(c.nome)}</a> ›` : `<span>${esc(c.nome)}</span>`).join(' ')}</div>
+  <div class="card">
+    <div class="row"><div style="flex:1"><span class="tag">${TIPOS[n.tipo]}</span><h2>${esc(n.nome)}</h2></div>
+      <button class="btn sm" data-acao="editar">Editar</button></div>
+    ${n.obs?`<p class="hint">${esc(n.obs)}</p>`:''}
+    <h3>Medidas (${feitos}/${n.medidas.length})</h3>
+    <p class="hint" style="margin:-2px 0 8px">A próxima leitura da trena cai na linha verde. Toque em outra linha para mudar.</p>
+    <div class="list">
+      ${n.medidas.map(m=>`
+        <div class="slot ${m.id===S.alvo?'alvo':''}" data-alvo="${m.id}">
+          <div class="r">${esc(m.rotulo)}${m.origem==='manual'?' <span class="tag">manual</span>':''}</div>
+          <div class="v ${m.valor==null?'vazio':''}">${m.valor==null?(m.id===S.alvo?'aguardando…':'—'):fmt(m.valor)}</div>
+          <button class="btn sm" data-med="${m.id}">⋯</button>
+        </div>`).join('')}
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn sm" data-acao="addMedida">+ Medida</button>
+      <button class="btn sm" data-acao="manual">Digitar valor</button>
+    </div>
+  </div>
+  ${FILHOS[n.tipo].length?`
+  <div class="card">
+    <h3 style="margin-top:0">Dentro de ${esc(n.nome)}</h3>
+    <div class="list">
+      ${fs.length?fs.map(f=>{const tot=f.medidas.length, ok=f.medidas.filter(m=>m.valor!=null).length, sub=filhos(f.id).length;
+        return `<div class="item" data-ir="${f.id}"><div class="n">${esc(f.nome)}<small>${TIPOS[f.tipo]} · ${ok}/${tot} medidas${sub?` · ${sub} itens`:''}</small></div><span>›</span></div>`}).join('')
+       :'<p class="hint">Nada cadastrado ainda.</p>'}
+    </div>
+    <div class="row" style="margin-top:8px">
+      ${FILHOS[n.tipo].map(t=>`<button class="btn sm p" data-novo="${t}">+ ${TIPOS[t]}</button>`).join('')}
+    </div>
+  </div>`:''}
+  ${n.pai?`<div class="row"><button class="btn sm" data-ir="${n.pai}">‹ Voltar</button></div>`:''}
+  `;
+  salvar();
+}
+
+$('#app').addEventListener('click', e=>{
+  const el=e.target.closest('[data-ir],[data-alvo],[data-med],[data-novo],[data-acao]'); if(!el) return;
+  e.preventDefault();
+  const n=no(S.atual);
+  if(el.dataset.med){ e.stopPropagation(); return menuMedida(el.dataset.med); }
+  if(el.dataset.ir){ S.atual=el.dataset.ir; S.alvo=null; render(); window.scrollTo(0,0); return; }
+  if(el.dataset.alvo){ S.alvo=el.dataset.alvo; render(); return; }
+  if(el.dataset.novo){ return dlgNovo(el.dataset.novo); }
+  const a=el.dataset.acao;
+  if(a==='editar') return dlgEditar(n);
+  if(a==='addMedida'){ const r=prompt('Nome da medida (ex.: Parede da pia, Viga, Largura do corredor):'); if(r){ const m={id:uid(),rotulo:r.trim(),valor:null}; n.medidas.push(m); S.alvo=m.id; render(); } return; }
+  if(a==='manual'){ const m=n.medidas.find(x=>x.id===S.alvo); if(!m) return toast('Escolha a medida primeiro'); const v=prompt(`Valor de "${m.rotulo}" em metros (ex.: 3,45):`); if(v) aplicarLeitura(parseFloat(v.replace(',','.')),'manual'); return; }
+});
+
+function dlg(html){ $('#dlgC').innerHTML=html; $('#dlg').showModal(); }
+function fechar(){ $('#dlg').close(); }
+
+function dlgNovo(tipo){
+  const sug={area:'Casa',comodo:'Sala',porta:'Porta',janela:'Janela',outro:''}[tipo]||'';
+  dlg(`<h2>Novo: ${TIPOS[tipo]}</h2>
+    <label>Nome</label><input id="fNome" value="${esc(sug)}" placeholder="ex.: Quarto do casal">
+    ${tipo==='area'?'<p class="hint">Exemplos: Casa, Edícula, Garagem, Área coberta, Quintal, Muro.</p>':''}
+    ${tipo==='porta'||tipo==='janela'?'<label>Em qual parede?</label><input id="fObs" placeholder="ex.: parede norte / da rua">':''}
+    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn" onclick="fechar()">Cancelar</button><button class="btn p" id="fOk">Criar</button></div>`);
+  $('#fNome').select();
+  $('#fOk').onclick=()=>{ const nm=$('#fNome').value.trim()||TIPOS[tipo]; const f=novoNo(tipo,nm,S.atual); const o=$('#fObs'); if(o) f.obs=o.value.trim(); S.nos.push(f); S.atual=f.id; S.alvo=null; fechar(); render(); };
+}
+function dlgEditar(n){
+  dlg(`<h2>Editar ${TIPOS[n.tipo]}</h2>
+    <label>Nome</label><input id="fNome" value="${esc(n.nome)}">
+    <label>Observações (piso, revestimento, estado, umidade, telhado…)</label><textarea id="fObs">${esc(n.obs)}</textarea>
+    <div class="row" style="margin-top:12px;justify-content:space-between">
+      ${n.pai?'<button class="btn w" id="fDel">Excluir</button>':'<span></span>'}
+      <span class="row"><button class="btn" onclick="fechar()">Cancelar</button><button class="btn p" id="fOk">Salvar</button></span></div>`);
+  $('#fOk').onclick=()=>{ n.nome=$('#fNome').value.trim()||n.nome; n.obs=$('#fObs').value.trim(); fechar(); render(); };
+  const d=$('#fDel'); if(d) d.onclick=()=>{ if(!confirm(`Excluir "${n.nome}" e tudo dentro dele?`)) return;
+    const apagar=id=>{ filhos(id).forEach(f=>apagar(f.id)); S.nos=S.nos.filter(x=>x.id!==id); };
+    const p=n.pai; apagar(n.id); S.atual=p; fechar(); render(); };
+}
+function menuMedida(mid){
+  const n=no(S.atual), m=n.medidas.find(x=>x.id===mid);
+  dlg(`<h2>${esc(m.rotulo)}</h2><p>${fmt(m.valor)} ${m.ts?`<span class="hint">· ${new Date(m.ts).toLocaleString('pt-BR')}</span>`:''}</p>
+    ${m.raw?`<p class="hint">pacote: ${esc(m.raw)}</p>`:''}
+    <label>Renomear</label><input id="fR" value="${esc(m.rotulo)}">
+    <div class="row" style="margin-top:12px;justify-content:space-between">
+      <span class="row"><button class="btn w" id="fDel">Excluir</button><button class="btn" id="fLimpa">Limpar valor</button></span>
+      <button class="btn p" id="fOk">OK</button></div>`);
+  $('#fOk').onclick=()=>{ m.rotulo=$('#fR').value.trim()||m.rotulo; fechar(); render(); };
+  $('#fLimpa').onclick=()=>{ m.valor=null; delete m.ts; delete m.raw; delete m.origem; S.alvo=m.id; fechar(); render(); };
+  $('#fDel').onclick=()=>{ n.medidas=n.medidas.filter(x=>x.id!==mid); fechar(); render(); };
+}
+
+/* Coloca a leitura na medida-alvo e avança */
+let ultimo={v:null,t:0};
+function aplicarLeitura(v, origem, raw){
+  if(!isFinite(v)) return toast('Valor inválido');
+  const agora=Date.now();
+  $('#leitVal').textContent=fmt(v); $('#leitInfo').textContent= origem==='trena'?'Última leitura da trena':'Valor digitado';
+  if(origem==='trena' && ultimo.v===v && agora-ultimo.t<1500) return; // pacote duplicado
+  ultimo={v,t:agora};
+  const n=no(S.atual); let m=n.medidas.find(x=>x.id===S.alvo);
+  if(!m){ // tudo preenchido: cria medida avulsa
+    m={id:uid(), rotulo:'Medida '+(n.medidas.length+1), valor:null}; n.medidas.push(m);
+  }
+  m.valor=Math.round(v*1000)/1000; m.ts=new Date().toISOString(); m.origem=origem; if(raw) m.raw=raw; else delete m.raw;
+  if(navigator.vibrate) navigator.vibrate(60);
+  toast(`${m.rotulo}: ${fmt(m.valor)}`);
+  S.alvo=proximoAlvo(n);
+  render();
+}
+
+/* ===================== Bluetooth ===================== */
+let dev=null, txChar=null, buf=null, LOG=[];
+function log(s){ LOG.push(new Date().toLocaleTimeString('pt-BR')+'  '+s); if(LOG.length>300) LOG.shift(); }
+function setBt(on, txt){ const b=$('#btBtn'); b.classList.toggle('on',on); b.textContent=txt; }
+
+async function conectar(){
+  if(!navigator.bluetooth){ alert('Este navegador não tem Bluetooth Web.\nUse o Google Chrome no Android, abrindo o link do app.'); return; }
+  try{
+    setBt(false,'Procurando…');
+    dev = await navigator.bluetooth.requestDevice({filters:[{namePrefix:'LDM'},{services:[SVC]}], optionalServices:[SVC]});
+    dev.addEventListener('gattserverdisconnected', ()=>{ setBt(false,'Reconectar'); txChar=null; log('desconectado'); });
+    await ligarGatt();
+  }catch(e){ setBt(false,'Conectar trena'); log('erro: '+e.message); if(e.name!=='NotFoundError') alert('Não conectou: '+e.message); }
+}
+async function ligarGatt(){
+  setBt(false,'Conectando…');
+  const srv = await dev.gatt.connect();
+  const s = await srv.getPrimaryService(SVC);
+  txChar = await s.getCharacteristic(CH_TX);
+  const d = await s.getCharacteristic(CH_DATA);
+  d.addEventListener('characteristicvaluechanged', ev=>onDados(new Uint8Array(ev.target.value.buffer),'ae02'));
+  await d.startNotifications();
+  try{ const st=await s.getCharacteristic(CH_STATUS); st.addEventListener('characteristicvaluechanged', ev=>onDados(new Uint8Array(ev.target.value.buffer),'ae05')); await st.startNotifications(); }catch(e){ log('ae05 indisponível: '+e.message); }
+  setBt(true, (dev.name||'Trena')+' ✓');
+  log('conectado a '+(dev.name||'?'));
+  toast('Trena conectada. Aperte ON na trena ou "Medir" aqui.');
+  try{ await enviar(CMD.versao); }catch(e){}
+}
+async function enviar(p){
+  if(!txChar) throw new Error('trena não conectada');
+  log('>> '+hex(p));
+  if(txChar.writeValueWithoutResponse) await txChar.writeValueWithoutResponse(p); else await txChar.writeValue(p);
+}
+function onDados(u8, ch){
+  log(`<< [${ch}] ${hex(u8)}`);
+  // remonta pacotes que chegam fatiados (MTU 20)
+  if(u8[0]===0xF1) buf=u8; else if(buf){ const j=new Uint8Array(buf.length+u8.length); j.set(buf); j.set(u8,buf.length); buf=j; } else return;
+  if(buf[1]===0x03 && buf[2]===0x02){ // versão (JSON em texto)
+    const txt=new TextDecoder().decode(buf.slice(3)); const i=txt.indexOf('{'), f=txt.lastIndexOf('}');
+    if(i>=0&&f>i) log('versão: '+txt.slice(i,f+1)); return;
+  }
+  const r=parsePacote(buf);
+  if(!r || r.tipo==='incompleto') return;
+  if(r.tipo==='erro'){ toast(ERROS[r.codigo]||'A trena reportou erro'); buf=null; return; }
+  if(r.tipo==='distancia'||r.tipo==='historico'){ aplicarLeitura(r.valor,'trena',hex(buf)); buf=null; return; }
+  toast(`Leitura de ${r.tipo} (${r.valor}) ignorada — deixe a trena no modo de medida simples`); buf=null;
+}
+
+$('#btBtn').onclick=()=>{ if(dev && !dev.gatt.connected) ligarGatt().catch(e=>{ setBt(false,'Conectar trena'); alert(e.message); }); else if(!txChar) conectar(); };
+$('#medirBtn').onclick=async()=>{
+  if(!txChar){ const n=no(S.atual), m=n.medidas.find(x=>x.id===S.alvo); const v=prompt(`Trena não conectada.\nDigite o valor de "${m?m.rotulo:'nova medida'}" em metros:`); if(v) aplicarLeitura(parseFloat(v.replace(',','.')),'manual'); return; }
+  try{ await enviar(CMD.medir); }catch(e){ toast('Falha ao enviar: '+e.message); }
+};
+
+/* ===================== Exportar / GitHub ===================== */
+function resumoMd(){
+  const L=[`# ${S.projeto}`,'',`Atualizado em ${new Date().toLocaleString('pt-BR')}. Medidas em metros (trena Huepar S120, referência traseira).`,''];
+  const rec=(n,nivel)=>{
+    L.push(`${'#'.repeat(Math.min(nivel+1,6))} ${n.nome} (${TIPOS[n.tipo]})`);
+    if(n.obs) L.push('', `> ${n.obs.replace(/\n/g,' ')}`);
+    const ms=n.medidas.filter(m=>m.valor!=null);
+    if(ms.length){ L.push('','| Medida | Valor (m) | Origem |','|---|---:|---|'); ms.forEach(m=>L.push(`| ${m.rotulo} | ${m.valor.toFixed(3).replace('.',',')} | ${m.origem||''} |`)); }
+    const falt=n.medidas.filter(m=>m.valor==null).map(m=>m.rotulo); if(falt.length) L.push('',`Faltando: ${falt.join(', ')}`);
+    L.push('');
+    filhos(n.id).forEach(f=>rec(f,nivel+1));
+  };
+  S.nos.filter(n=>!n.pai).forEach(n=>rec(n,1));
+  return L.join('\n');
+}
+function dados(){ return JSON.stringify({app:'trena-planta', exportado:new Date().toISOString(), projeto:S.projeto, nos:S.nos}, null, 2); }
+function baixar(nome, txt, tipo){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:tipo})); a.download=nome; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
+async function compartilhar(){
+  const f=new File([dados()],'levantamento.json',{type:'application/json'});
+  if(navigator.canShare && navigator.canShare({files:[f]})){ try{ await navigator.share({files:[f], title:'Levantamento da casa'}); return; }catch(e){ if(e.name==='AbortError') return; } }
+  baixar('levantamento.json', dados(), 'application/json');
+}
+const b64=s=>{ const by=new TextEncoder().encode(s); let bin=''; by.forEach(x=>bin+=String.fromCharCode(x)); return btoa(bin); };
+async function ghPut(cfg, path, conteudo, msg){
+  const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${path}`;
+  const h={Authorization:'Bearer '+cfg.token, Accept:'application/vnd.github+json'};
+  let sha; const g=await fetch(url+`?ref=${encodeURIComponent(cfg.branch)}`,{headers:h});
+  if(g.ok) sha=(await g.json()).sha; else if(g.status!==404) throw new Error(`GitHub ${g.status}: ${(await g.text()).slice(0,160)}`);
+  const r=await fetch(url,{method:'PUT',headers:h,body:JSON.stringify({message:msg,content:b64(conteudo),branch:cfg.branch,...(sha?{sha}:{})})});
+  if(!r.ok) throw new Error(`GitHub ${r.status}: ${(await r.text()).slice(0,200)}`);
+}
+async function enviarGitHub(){
+  const c=S.config.gh;
+  if(!c||!c.token) return dlgGitHub();
+  toast('Enviando ao GitHub…');
+  try{
+    const msg='Levantamento '+new Date().toLocaleString('pt-BR');
+    await ghPut(c,'dados/levantamento.json',dados(),msg);
+    await ghPut(c,'dados/levantamento.md',resumoMd(),msg);
+    S.config.ultimoEnvio=new Date().toISOString(); salvar();
+    toast('Enviado ✓ — avise o Claude que pode ler');
+  }catch(e){ alert('Não enviei: '+e.message); }
+}
+function dlgGitHub(){
+  const c=S.config.gh||{owner:'pedroduartecampos1-cpu',repo:'levantamento-casa',branch:'main',token:''};
+  dlg(`<h2>Enviar ao GitHub</h2>
+    <p class="hint">As medidas vão para <b>dados/levantamento.json</b> e <b>dados/levantamento.md</b> no repositório privado. O token fica só neste celular.</p>
+    <label>Usuário/organização</label><input id="gO" value="${esc(c.owner)}">
+    <label>Repositório (privado)</label><input id="gR" value="${esc(c.repo)}">
+    <label>Branch</label><input id="gB" value="${esc(c.branch)}">
+    <label>Token (fine-grained, só esse repositório, permissão Contents: Read and write)</label><input id="gT" type="password" value="${esc(c.token)}" placeholder="github_pat_…">
+    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn" onclick="fechar()">Cancelar</button><button class="btn p" id="gOk">Salvar e enviar</button></div>`);
+  $('#gOk').onclick=()=>{ S.config.gh={owner:$('#gO').value.trim(),repo:$('#gR').value.trim(),branch:$('#gB').value.trim()||'main',token:$('#gT').value.trim()}; salvar(); fechar(); enviarGitHub(); };
+}
+function importar(){
+  const i=document.createElement('input'); i.type='file'; i.accept='application/json,.json';
+  i.onchange=async()=>{ try{ const d=JSON.parse(await i.files[0].text()); if(!d.nos) throw new Error('arquivo sem dados'); if(!confirm('Substituir o levantamento atual por este arquivo?')) return;
+    S.nos=d.nos; S.projeto=d.projeto||S.projeto; S.atual=S.nos[0].id; S.alvo=null; render(); toast('Importado'); }catch(e){ alert('Arquivo inválido: '+e.message); } };
+  i.click();
+}
+$('#menuBtn').onclick=()=>{
+  const env=S.config.ultimoEnvio?new Date(S.config.ultimoEnvio).toLocaleString('pt-BR'):'nunca';
+  dlg(`<h2>Menu</h2>
+    <div class="list">
+      <button class="btn p" id="mGh">⬆ Enviar ao GitHub (para o Claude)</button>
+      <p class="hint" style="margin:0">Último envio: ${env}</p>
+      <button class="btn" id="mSh">Compartilhar / baixar JSON</button>
+      <button class="btn" id="mMd">Baixar resumo (.md)</button>
+      <button class="btn" id="mIm">Importar JSON</button>
+      <button class="btn" id="mCfg">Configurar GitHub</button>
+      <button class="btn" id="mLog">Ver log da trena (diagnóstico)</button>
+      <button class="btn w" id="mZera">Apagar tudo e começar de novo</button>
+      <button class="btn" onclick="fechar()">Fechar</button>
+    </div>`);
+  $('#mGh').onclick=()=>{ fechar(); enviarGitHub(); };
+  $('#mSh').onclick=()=>{ fechar(); compartilhar(); };
+  $('#mMd').onclick=()=>{ fechar(); baixar('levantamento.md',resumoMd(),'text/markdown'); };
+  $('#mIm').onclick=()=>{ fechar(); importar(); };
+  $('#mCfg').onclick=()=>{ fechar(); dlgGitHub(); };
+  $('#mLog').onclick=()=>{ dlg(`<h2>Log da trena</h2><div class="log" id="lg">${esc(LOG.join('\n')||'(vazio)')}</div>
+      <div class="row" style="margin-top:10px;justify-content:flex-end"><button class="btn" id="lgC">Copiar</button><button class="btn p" onclick="fechar()">Fechar</button></div>`);
+      $('#lgC').onclick=()=>navigator.clipboard.writeText(LOG.join('\n')).then(()=>toast('Log copiado'),()=>toast('Não copiou')); };
+  $('#mZera').onclick=()=>{ if(confirm('Apagar TODAS as medidas deste celular? (o que já foi enviado ao GitHub continua lá)')){ S=estadoInicial(); fechar(); render(); } };
+};
+
+/* tela ligada durante a medição */
+async function manterTela(){ try{ if('wakeLock' in navigator) await navigator.wakeLock.request('screen'); }catch(e){} }
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') manterTela(); });
+
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+carregar(); render(); manterTela();
+if(typeof module!=='undefined') module.exports={parsePacote,pkt};
+</script>
+</body>
+</html>

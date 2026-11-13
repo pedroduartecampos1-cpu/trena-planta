@@ -1,0 +1,9 @@
+{
+  "name": "Trena → Planta",
+  "short_name": "Trena",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f3ee",
+  "theme_color": "#1f2a1a",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]
+}
