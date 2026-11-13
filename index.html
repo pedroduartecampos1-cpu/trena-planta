@@ -107,6 +107,13 @@ function parsePacote(b){
   if(t===0x03 && s===0x01 && b.length>=11){
     return {tipo:'historico', valor:((b[9]<<8)|b[10])/1000, conf:'alta'};
   }
+  // formato real visto no S120G (fw 1.0.11): F1 04 01 SS MM UU 01 31 50 V2 V1 V0 XX CS
+  // distância = 24 bits (bytes 9-11) em centésimos de mm. Ex.: 02 f8 8c = 194700 -> 1,947 m
+  if(t===0x04 && s===0x01 && b.length>=12 && b[6]===0x01 && b[7]===0x31 && b[8]===0x50){
+    const raw=(b[9]<<16)|(b[10]<<8)|b[11];
+    if(b[3]!==0x00) return {tipo:'erro', info:'Erro da trena', codigo:b[3]};
+    return {tipo:'distancia', valor:raw/100000, conf:'alta', modo:b[4], unid:b[5], formato:'s120g'};
+  }
   // medição: estrutura de 23 bytes após o prefixo; RecDataMain = bytes 12-15
   const ehMed = (t===0x02 && (s===0x01||s===0x04)) || (t===0x04 && s===0x01);
   if(ehMed){
