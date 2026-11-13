@@ -67,7 +67,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 <main id="app"></main>
 
 <div class="foot"><div class="in">
-  <div class="leit"><small id="leitInfo">Última leitura</small><b id="leitVal">—</b></div>
+  <div class="leit"><small id="leitInfo">Última leitura · v3</small><b id="leitVal">—</b></div>
   <button class="big" id="medirBtn">Medir</button>
 </div></div>
 
@@ -78,6 +78,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 
 <script>
 "use strict";
+const VERSAO="v3 (12/11 23:20)";
 /* ===================== Protocolo Huepar S120 (BLE) ===================== */
 const SVC = 0xae30;                 // 0000ae30-0000-1000-8000-00805f9b34fb
 const CH_TX = 0xae01;               // write-without-response
@@ -401,7 +402,7 @@ function importar(){
 }
 $('#menuBtn').onclick=()=>{
   const env=S.config.ultimoEnvio?new Date(S.config.ultimoEnvio).toLocaleString('pt-BR'):'nunca';
-  dlg(`<h2>Menu</h2>
+  dlg(`<h2>Menu</h2><p class="hint">Versão do app: ${VERSAO}</p>
     <div class="list">
       <button class="btn p" id="mGh">⬆ Enviar ao GitHub (para o Claude)</button>
       <p class="hint" style="margin:0">Último envio: ${env}</p>
